@@ -1,3 +1,5 @@
+# see:
+#   https://github.com/pfremm/fluent-plugin-json-in-json/tree/0.2
 require 'yajl'
 
 module Fluent
@@ -7,6 +9,7 @@ module Fluent
 
       config_param :time_key, :string, :default => 'time'
       config_param :time_format, :string, :default => nil
+      config_param :key, :string, :default => nil
 
       def configure(conf)
         super
@@ -15,6 +18,27 @@ module Fluent
           @time_parser = TimeParser.new(@time_format)
           @mutex = Mutex.new
         end
+      end
+
+      def flatten(json, prefix)
+        json.keys.each do |key|
+          if prefix.empty?
+            full_path = key
+          else
+            full_path = [prefix, key].join('.')
+          end
+
+          if json[key].is_a?(Hash)
+            value = json[key]
+            json.delete key
+            json.merge! flatten(value, full_path)
+          else
+            value = json[key]
+            json.delete key
+            json[full_path] = value
+          end
+        end
+        return json
       end
 
       def parse(text)
@@ -41,11 +65,13 @@ module Fluent
 
         values = Hash.new
         record.each do |k, v|
-          if v[0] == '{'
-            deserialized = Yajl.load(v)
-            if deserialized.is_a?(Hash)
-              values.merge!(deserialized)
-              record.delete k
+          if @key && k == @key
+            if v[0] == '{'
+              deserialized = Yajl.load(v)
+              if deserialized.is_a?(Hash)
+                values.merge!(flatten(deserialized, ""))
+                record.delete k
+              end
             end
           end
         end
